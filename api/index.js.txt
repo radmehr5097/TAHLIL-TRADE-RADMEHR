@@ -1,0 +1,76 @@
+const express = require('express');
+const path = require('path');
+const app = express();
+
+app.use(express.json());
+
+// ===== قیمت لحظه‌ای =====
+app.get('/api/price/:symbol', async (req, res) => {
+    try {
+        const symbol = req.params.symbol.toUpperCase();
+        const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+        const data = await response.json();
+        res.json(data);
+    } catch {
+        res.status(500).json({ error: 'خطا در دریافت قیمت' });
+    }
+});
+
+// ===== داده‌های کندل (برای اندیکاتورها) =====
+app.get('/api/klines/:symbol', async (req, res) => {
+    try {
+        const symbol = req.params.symbol.toUpperCase();
+        const limit = req.query.limit || 60;
+        const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`);
+        const data = await response.json();
+        res.json(data);
+    } catch {
+        res.status(500).json({ error: 'خطا در دریافت کندل‌ها' });
+    }
+});
+
+// ===== هوش مصنوعی (GitHub Models) =====
+app.post('/api/ai', async (req, res) => {
+    try {
+        const token = process.env.GITHUB_TOKEN;
+        if (!token) return res.status(500).json({ error: 'GITHUB_TOKEN تنظیم نشده' });
+        
+        const { model, messages, temperature, max_tokens } = req.body;
+        const response = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ model, messages, temperature, max_tokens })
+        });
+        const data = await response.json();
+        res.json(data);
+    } catch {
+        res.status(500).json({ error: 'خطا در ارتباط با هوش مصنوعی' });
+    }
+});
+
+// ===== لیست مدل‌های گیت‌هاب =====
+app.get('/api/models', async (req, res) => {
+    try {
+        const token = process.env.GITHUB_TOKEN;
+        if (!token) return res.status(500).json({ error: 'GITHUB_TOKEN تنظیم نشده' });
+        
+        const response = await fetch('https://models.github.ai/catalog/models', {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github+json'
+            }
+        });
+        const data = await response.json();
+        res.json(data);
+    } catch {
+        res.status(500).json({ error: 'خطا در دریافت لیست مدل‌ها' });
+    }
+});
+
+// ===== نمایش فایل‌های ظاهری =====
+app.use(express.static(path.join(__dirname, '../public')));
+
+module.exports = app;
