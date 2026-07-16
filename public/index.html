@@ -1,170 +1,40 @@
-// ============================================
-//  سیستم سیگنال‌دهی ترکیبی (بر اساس نمونه کانال)
-// ============================================
-
-function generateCombinedSignal(symbol, prices, indicators) {
-    // استخراج داده‌ها
-    const price15m = prices.slice(-1)[0];
-    const price1h = prices.slice(-20); // ۲۰ کندل ۱ ساعته
-    const price4h = prices.slice(-80); // ۸۰ کندل ۴ ساعته
-    const priceDaily = prices.slice(-360); // ۳۶۰ کندل روزانه
-    
-    // محاسبه اندیکاتورها برای هر تایم‌فریم
-    const rsi15m = calcRSI(prices.slice(-14));
-    const rsi1h = calcRSI(price1h);
-    const rsiDaily = calcRSI(priceDaily);
-    
-    const macd15m = calcMACD(prices.slice(-26));
-    const macd1h = calcMACD(price1h);
-    const macdDaily = calcMACD(priceDaily);
-    
-    // سطوح حمایت و مقاومت (محاسبه با روش عرضه/تقاضا)
-    const support = Math.min(...price1h.slice(-20)) * 0.995;
-    const resistance = Math.max(...price1h.slice(-20)) * 1.005;
-    
-    // POC (نقطه کنترل حجم) - شبیه‌سازی با میانگین وزنی قیمت
-    const poc = price1h.reduce((sum, p) => sum + p, 0) / price1h.length;
-    
-    // تشخیص روند ۴ ساعت
-    const ema50_4h = calcEMA(price4h, 50);
-    const trend4h = price4h[price4h.length-1] > ema50_4h ? 'صعودی' : 'نزولی';
-    
-    // کندل فعلی ۱۵ دقیقه
-    const currentCandle = {
-        close: price15m,
-        body: price15m - prices[prices.length-2],
-        volume: Math.random() * 1000 + 500 // شبیه‌سازی (در واقعیت از API دریافت می‌شود)
-    };
-    
-    // ===== تولید سیگنال اسکالپ (سبک ۱ - مشابه نمونه شما) =====
-    const scalpSignal = generateScalpSignal({
-        price15m: currentCandle,
-        volume: currentCandle.volume,
-        avgVolume: 750,
-        rsi: rsi15m,
-        macd: macd15m,
-        support: support,
-        resistance: resistance,
-        poc: poc,
-        fourHourTrend: trend4h
-    });
-    
-    // ===== تولید سیگنال روزانه (سبک ۲) =====
-    const daySignal = generateDaySignal({
-        price1h: { close: price1h[price1h.length-1], low: Math.min(...price1h.slice(-5)) },
-        price4h: { close: price4h[price4h.length-1], low: Math.min(...price4h.slice(-5)), high: Math.max(...price4h.slice(-5)) },
-        rsi1h: rsi1h,
-        macd1h: macd1h,
-        ema20: calcEMA(price1h, 20),
-        ema50: calcEMA(price1h, 50),
-        superTrend: calcSuperTrend(price1h),
-        fibLevels: calcFibonacci(price1h)
-    });
-    
-    // ===== تولید سیگنال پوزیشن (سبک ۳) =====
-    const positionSignal = generatePositionSignal({
-        priceDaily: { close: priceDaily[priceDaily.length-1] },
-        priceWeekly: { close: priceDaily.filter((_, i) => i % 7 === 0) },
-        rsiWeekly: calcRSI(priceDaily.filter((_, i) => i % 7 === 0)),
-        macdWeekly: calcMACD(priceDaily.filter((_, i) => i % 7 === 0)),
-        ichimoku: calcIchimoku(priceDaily),
-        bb: calcBB(priceDaily),
-        volume: { current: 1000, avg: 800 }
-    });
-    
-    // ===== ترکیب نهایی =====
-    const finalSignal = {
-        timestamp: new Date().toLocaleString('fa-IR'),
-        symbol: symbol,
-        currentPrice: price15m,
-        scalp: scalpSignal,
-        day: daySignal,
-        position: positionSignal,
-        summary: {
-            bestAction: determineBestAction(scalpSignal, daySignal, positionSignal),
-            riskLevel: calculateOverallRisk(scalpSignal, daySignal, positionSignal),
-            confidence: calculateOverallConfidence(scalpSignal, daySignal, positionSignal),
-            recommendation: generateRecommendation(scalpSignal, daySignal, positionSignal)
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TAHLIL TRADE RADMEHR</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0b0e1a;
+            color: #e0e6f0;
+            overflow-x: hidden;
+            scroll-behavior: smooth;
         }
-    };
-    
-    return finalSignal;
-}
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #141b2b; }
+        ::-webkit-scrollbar-thumb { background: #f0b90b; border-radius: 4px; }
 
-// ===== توابع کمکی =====
-function determineBestAction(scalp, day, position) {
-    const actions = [];
-    if (scalp.type === 'BUY' || scalp.type === 'SELL') actions.push(scalp.type);
-    if (day.type === 'BUY' || day.type === 'SELL') actions.push(day.type);
-    if (position.type === 'BUY (LONG-TERM)' || position.type === 'SELL (LONG-TERM)') actions.push(position.type);
-    
-    if (actions.length === 0) return 'WAIT (صبر کنید)';
-    
-    // اگر حداقل ۲ تایم‌فریم هم‌جهت بودند، سیگنال قوی است
-    const buyCount = actions.filter(a => a.includes('BUY')).length;
-    const sellCount = actions.filter(a => a.includes('SELL')).length;
-    
-    if (buyCount >= 2) return 'BUY (خرید قوی)';
-    if (sellCount >= 2) return 'SELL (فروش قوی)';
-    if (buyCount === 1 && sellCount === 0) return 'BUY (خرید ضعیف)';
-    if (sellCount === 1 && buyCount === 0) return 'SELL (فروش ضعیف)';
-    
-    return 'WAIT (تضاد سیگنال‌ها)';
-}
-
-function calculateOverallRisk(scalp, day, position) {
-    let riskScore = 0;
-    if (scalp.type === 'WAIT') riskScore += 20;
-    if (day.type === 'NEUTRAL') riskScore += 20;
-    if (position.type === 'HOLD') riskScore += 20;
-    if (scalp.type === 'BUY' || scalp.type === 'SELL') riskScore += 10;
-    if (day.type === 'BUY' || day.type === 'SELL') riskScore += 10;
-    if (position.type === 'BUY (LONG-TERM)' || position.type === 'SELL (LONG-TERM)') riskScore += 5;
-    
-    if (riskScore >= 60) return 'پایین';
-    if (riskScore >= 40) return 'متوسط';
-    return 'بالا';
-}
-
-function calculateOverallConfidence(scalp, day, position) {
-    let confidenceScore = 0;
-    if (scalp.type === 'BUY' || scalp.type === 'SELL') confidenceScore += 30;
-    if (day.type === 'BUY' || day.type === 'SELL') confidenceScore += 30;
-    if (position.type === 'BUY (LONG-TERM)' || position.type === 'SELL (LONG-TERM)') confidenceScore += 40;
-    if (scalp.type === 'WAIT' && scalp.condition.includes('شرط')) confidenceScore += 10;
-    if (day.confidence === 'بالا') confidenceScore += 10;
-    if (position.confidence === 'بالا') confidenceScore += 10;
-    
-    if (confidenceScore >= 70) return 'بالا (۹۰٪)';
-    if (confidenceScore >= 50) return 'متوسط (۷۰٪)';
-    return 'پایین (۵۰٪)';
-}
-
-function generateRecommendation(scalp, day, position) {
-    let rec = '';
-    
-    if (scalp.type === 'WAIT' && scalp.condition.includes('ناحیه عرضه')) {
-        rec += '⚠️ اسکالپ: ' + scalp.condition + '. ';
-    } else if (scalp.type === 'BUY' || scalp.type === 'SELL') {
-        rec += `✅ اسکالپ: ${scalp.type} در ${scalp.entry} - SL: ${scalp.sl} - اهداف: ${scalp.targets.join(', ')}. `;
-    }
-    
-    if (day.type === 'BUY' || day.type === 'SELL') {
-        rec += `📊 روزانه: ${day.type} در ${day.entry} - SL: ${day.sl} - اهداف: ${day.targets.join(', ')}. `;
-    }
-    
-    if (position.type === 'BUY (LONG-TERM)' || position.type === 'SELL (LONG-TERM)') {
-        rec += `🏛️ پوزیشن: ${position.type} در ${position.entry} - افق زمانی: ${position.timeHorizon}. `;
-    }
-    
-    if (!rec) {
-        rec = '🧘 هیچ سیگنال معاملاتی فعالی وجود ندارد. به‌ترین کار «تماشا و صبر کردن» است.';
-    }
-    
-    rec += `\n📱 جهت پشتیبانی و مشاوره تخصصی با تلفن 09138665345 تماس حاصل فرمایید.`;
-    
-    return rec;
-}            0% { opacity: 0.2; transform: scale(0.8); }
+        #stars {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: -1;
+            background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
+            overflow: hidden;
+        }
+        .star {
+            position: absolute;
+            border-radius: 50%;
+            background: white;
+            animation: twinkle var(--duration) infinite alternate;
+        }
+        @keyframes twinkle {
+            0% { opacity: 0.2; transform: scale(0.8); }
             100% { opacity: 1; transform: scale(1.2); }
         }
 
@@ -273,7 +143,8 @@ function generateRecommendation(scalp, day, position) {
 
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
         .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; }
-        @media (max-width: 992px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+        @media (max-width: 992px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
 
         input, select, button {
             padding: 14px 20px;
@@ -310,7 +181,7 @@ function generateRecommendation(scalp, day, position) {
         }
         .btn-outline:hover { background: rgba(240,185,11,0.1); }
 
-        .chart-wrapper { height: 280px; position: relative; }
+        .chart-wrapper { height: 200px; position: relative; }
         .chart-wrapper canvas { width: 100% !important; height: 100% !important; }
 
         .signal-card {
@@ -346,16 +217,14 @@ function generateRecommendation(scalp, day, position) {
         .msg.user { align-self: flex-end; background: #f0b90b; color: #0b0e1a; }
         .msg.ai { align-self: flex-start; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,215,0,0.1); }
 
-        .loader {
-            border: 4px solid rgba(255,215,0,0.1);
-            border-top: 4px solid #f0b90b;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 0.8s linear infinite;
-            margin: 20px auto;
+        .indicator-box {
+            background: rgba(0,0,0,0.2);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
         }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .indicator-box .label { color: #8a99b8; font-size: 12px; }
+        .indicator-box .value { font-size: 22px; font-weight: 700; color: #f0b90b; margin-top: 4px; }
 
         @media (max-width: 600px) {
             header { padding: 12px 18px; flex-wrap: wrap; gap: 10px; }
@@ -388,6 +257,7 @@ function generateRecommendation(scalp, day, position) {
     </section>
 
     <div class="container">
+        <!-- انتخاب ارز -->
         <div class="glass" style="margin-bottom:40px;">
             <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
                 <div style="flex:2; min-width:200px;">
@@ -404,83 +274,51 @@ function generateRecommendation(scalp, day, position) {
             </div>
         </div>
 
+        <!-- اندیکاتورها -->
         <section id="indicators" style="margin-bottom:50px;">
             <div class="section-title"><i class="fas fa-chart-bar"></i> اندیکاتورهای تحلیلی</div>
-            <div class="grid-2">
-                <div class="glass">
-                    <h4 style="margin-bottom:16px;"><i class="fas fa-wave-square"></i> RSI (قدرت نسبی)</h4>
-                    <div id="rsiValue" style="font-size:32px; font-weight:800; color:#f0b90b;">—</div>
-                    <div style="margin-top:10px; font-size:14px; color:#8a99b8;">نشان‌دهنده‌ی اشباع خرید/فروش</div>
-                    <div class="chart-wrapper" style="height:80px; margin-top:12px;"><canvas id="rsiChart"></canvas></div>
-                </div>
-                <div class="glass">
-                    <h4 style="margin-bottom:16px;"><i class="fas fa-arrow-trend-up"></i> MACD</h4>
-                    <div id="macdValue" style="font-size:32px; font-weight:800; color:#f0b90b;">—</div>
-                    <div style="margin-top:10px; font-size:14px; color:#8a99b8;">روند و مومنتوم</div>
-                    <div class="chart-wrapper" style="height:80px; margin-top:12px;"><canvas id="macdChart"></canvas></div>
-                </div>
-            </div>
-            <div class="grid-3" style="margin-top:30px;">
-                <div class="glass"><h5><i class="fas fa-mobile-alt"></i> SMA</h5><div id="smaValue" style="font-size:24px; font-weight:700; color:#f0b90b;">—</div></div>
-                <div class="glass"><h5><i class="fas fa-chart-line"></i> EMA</h5><div id="emaValue" style="font-size:24px; font-weight:700; color:#f0b90b;">—</div></div>
-                <div class="glass"><h5><i class="fas fa-arrows-alt-h"></i> باندهای بولینگر</h5><div id="bbValue" style="font-size:24px; font-weight:700; color:#f0b90b;">—</div></div>
-            </div>
-        </section>
-
-        <section id="signals" style="margin-bottom:50px;">
-            <div class="section-title"><i class="fas fa-bullseye"></i> سیگنال‌های سه‌سبکی با وین‌ریت بالا</div>
             <div class="grid-3">
-                <div class="glass">
-                    <h4 style="color:#f0b90b;"><i class="fas fa-clock"></i> اسکالپ</h4>
-                    <div id="signalScalp" class="signal-card"><div class="label">سیگنال</div><div class="value">در حال دریافت...</div><div class="winrate">وین‌ریت: ۹۷.۲٪</div></div>
-                    <button class="btn-outline" style="width:100%; margin-top:10px;" onclick="getSignal('scalp')">دریافت سیگنال</button>
-                </div>
-                <div class="glass">
-                    <h4 style="color:#f0b90b;"><i class="fas fa-sun"></i> روزانه</h4>
-                    <div id="signalDay" class="signal-card"><div class="label">سیگنال</div><div class="value">در حال دریافت...</div><div class="winrate">وین‌ریت: ۹۸.۱٪</div></div>
-                    <button class="btn-outline" style="width:100%; margin-top:10px;" onclick="getSignal('day')">دریافت سیگنال</button>
-                </div>
-                <div class="glass">
-                    <h4 style="color:#f0b90b;"><i class="fas fa-rocket"></i> پوزیشن</h4>
-                    <div id="signalPosition" class="signal-card"><div class="label">سیگنال</div><div class="value">در حال دریافت...</div><div class="winrate">وین‌ریت: ۹۹.۴٪</div></div>
-                    <button class="btn-outline" style="width:100%; margin-top:10px;" onclick="getSignal('position')">دریافت سیگنال</button>
-                </div>
+                <div class="glass"><h4>RSI</h4><div id="rsiValue" style="font-size:32px; font-weight:800; color:#f0b90b;">—</div></div>
+                <div class="glass"><h4>MACD</h4><div id="macdValue" style="font-size:32px; font-weight:800; color:#f0b90b;">—</div></div>
+                <div class="glass"><h4>SMA / EMA</h4><div id="smaValue" style="font-size:20px; font-weight:700;">—</div><div id="emaValue" style="font-size:20px; font-weight:700;">—</div></div>
             </div>
         </section>
 
+        <!-- سیگنال‌ها -->
+        <section id="signals" style="margin-bottom:50px;">
+            <div class="section-title"><i class="fas fa-bullseye"></i> سیگنال‌های سه‌سبکی</div>
+            <div class="grid-3">
+                <div class="glass"><h4 style="color:#f0b90b;">اسکالپ</h4><div id="signalScalp" class="signal-card"><div class="label">سیگنال</div><div class="value">در حال دریافت...</div><div class="winrate">وین‌ریت: ۹۷.۲٪</div></div><button class="btn-outline" style="width:100%;" onclick="getSignal('scalp')">دریافت</button></div>
+                <div class="glass"><h4 style="color:#f0b90b;">روزانه</h4><div id="signalDay" class="signal-card"><div class="label">سیگنال</div><div class="value">در حال دریافت...</div><div class="winrate">وین‌ریت: ۹۸.۱٪</div></div><button class="btn-outline" style="width:100%;" onclick="getSignal('day')">دریافت</button></div>
+                <div class="glass"><h4 style="color:#f0b90b;">پوزیشن</h4><div id="signalPosition" class="signal-card"><div class="label">سیگنال</div><div class="value">در حال دریافت...</div><div class="winrate">وین‌ریت: ۹۹.۴٪</div></div><button class="btn-outline" style="width:100%;" onclick="getSignal('position')">دریافت</button></div>
+            </div>
+        </section>
+
+        <!-- هوش مصنوعی -->
         <section id="ai" style="margin-bottom:40px;">
             <div class="section-title"><i class="fas fa-robot"></i> مشاوره با هوش مصنوعی</div>
             <div class="grid-2">
                 <div class="glass">
-                    <h4 style="margin-bottom:16px;"><i class="fas fa-comment-dots"></i> گفتگو با مدل</h4>
-                    <div id="chatBox"><div class="msg ai">سلام! من آماده‌ام. سوالی دارید؟</div></div>
-                    <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                        <input type="text" id="chatInput" placeholder="سوال خود را بپرسید..." style="flex:3;">
-                        <button id="sendChatBtn" style="flex:1;"><i class="fas fa-paper-plane"></i> ارسال</button>
-                    </div>
+                    <h4>گفتگو</h4>
+                    <div id="chatBox"><div class="msg ai">سلام! سوالی دارید؟</div></div>
+                    <div style="display:flex; gap:12px;"><input type="text" id="chatInput" placeholder="سوال..." style="flex:3;"><button id="sendChatBtn" style="flex:1;">ارسال</button></div>
                 </div>
                 <div class="glass">
-                    <h4 style="margin-bottom:16px;"><i class="fas fa-cogs"></i> انتخاب مدل</h4>
-                    <select id="modelSelect" style="margin-bottom:16px;"><option value="">بارگذاری...</option></select>
-                    <div style="background:rgba(240,185,11,0.08); border-radius:16px; padding:16px; border:1px solid rgba(240,185,11,0.2);">
-                        <i class="fas fa-star" style="color:#f0b90b;"></i>
-                        <span style="font-weight:700; color:#f0b90b;">پیشنهاد ما:</span>
-                        <div id="recommendation" style="margin-top:8px; font-size:18px; font-weight:600;">بارگذاری...</div>
-                        <div style="font-size:13px; color:#8a99b8; margin-top:4px;">بر اساس دقت در تحلیل مالی</div>
+                    <h4>انتخاب مدل</h4>
+                    <select id="modelSelect"><option>بارگذاری...</option></select>
+                    <div style="margin-top:16px; background:rgba(240,185,11,0.08); padding:16px; border-radius:16px;">
+                        <span style="color:#f0b90b;">پیشنهاد ما:</span>
+                        <div id="recommendation" style="font-size:18px; font-weight:600;">بارگذاری...</div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <footer style="text-align:center; padding:40px 0; border-top:1px solid rgba(255,215,0,0.05); color:#5a6a85; font-size:14px;">
-            <i class="fas fa-copyright"></i> ۲۰۲۶ TAHLIL TRADE RADMEHR
-        </footer>
+        <footer style="text-align:center; padding:40px 0; color:#5a6a85;">© ۲۰۲۶ TAHLIL TRADE RADMEHR</footer>
     </div>
 
     <script>
-        // ============================
-        //  ستاره‌ها (پارالاکس)
-        // ============================
+        // ===== ستاره‌ها =====
         (function() {
             const container = document.getElementById('stars');
             for (let i = 0; i < 150; i++) {
@@ -497,38 +335,19 @@ function generateRecommendation(scalp, day, position) {
             }
         })();
 
-        // ============================
-        //  متغیرهای عمومی
-        // ============================
         let currentPrice = 0;
-        let chartRSI = null, chartMACD = null;
         let _lastPrices = [];
         let _lastIndicators = {};
 
-        // ============================
-        //  توابع دریافت داده (بدون پروکسی)
-        // ============================
-        async function fetchPrice(symbol) {
-            const res = await fetch(`/api/price/${symbol}`);
-            const data = await res.json();
-            return parseFloat(data.price);
-        }
-
+        // ===== دریافت داده =====
         async function fetchKlines(symbol, limit = 60) {
             const res = await fetch(`/api/klines/${symbol}?limit=${limit}`);
             const data = await res.json();
-            return data.map(c => ({
-                time: c[0],
-                open: parseFloat(c[1]),
-                high: parseFloat(c[2]),
-                low: parseFloat(c[3]),
-                close: parseFloat(c[4])
-            }));
+            if (data.error) throw new Error(data.error);
+            return data.map(c => ({ open: c.open, high: c.high, low: c.low, close: c.close }));
         }
 
-        // ============================
-        //  محاسبه اندیکاتورها
-        // ============================
+        // ===== محاسبات =====
         function calcRSI(prices, period = 14) {
             if (prices.length < period) return 50;
             let gains = 0, losses = 0;
@@ -545,19 +364,16 @@ function generateRecommendation(scalp, day, position) {
             if (avgLoss === 0) return 100;
             return 100 - (100 / (1 + (avgGain / avgLoss)));
         }
-
         function calcMACD(prices, fast=12, slow=26) {
             if (prices.length < slow) return { macd: 0 };
             const emaFast = prices.reduce((a,b,i) => a + b * (2/(fast+1)) * Math.pow(1-2/(fast+1), prices.length-1-i), 0);
             const emaSlow = prices.reduce((a,b,i) => a + b * (2/(slow+1)) * Math.pow(1-2/(slow+1), prices.length-1-i), 0);
             return { macd: emaFast - emaSlow };
         }
-
         function calcSMA(prices, period=20) {
             if (prices.length < period) return prices[prices.length-1] || 0;
             return prices.slice(-period).reduce((a,b) => a+b, 0) / period;
         }
-
         function calcEMA(prices, period=20) {
             if (prices.length < period) return prices[prices.length-1] || 0;
             const k = 2/(period+1);
@@ -566,104 +382,50 @@ function generateRecommendation(scalp, day, position) {
             return ema;
         }
 
-        function calcBB(prices, period=20, stdDev=2) {
-            if (prices.length < period) return { upper: 0, middle: 0, lower: 0 };
-            const middle = calcSMA(prices, period);
-            const squaredDiffs = prices.slice(-period).map(p => Math.pow(p - middle, 2));
-            const std = Math.sqrt(squaredDiffs.reduce((a,b) => a+b, 0) / period);
-            return { upper: middle + stdDev*std, middle, lower: middle - stdDev*std };
-        }
-
-        // ============================
-        //  بروزرسانی اندیکاتورها
-        // ============================
+        // ===== بروزرسانی =====
         async function updateIndicators(symbol) {
             try {
                 const klines = await fetchKlines(symbol, 60);
-                if (!klines || klines.length === 0) { alert('ارز نامعتبر'); return; }
+                if (!klines || klines.length === 0) throw new Error('No data');
                 const prices = klines.map(k => k.close);
                 currentPrice = prices[prices.length-1];
                 document.getElementById('livePrice').textContent = '$' + currentPrice.toFixed(2);
                 _lastPrices = prices;
-
-                const rsi = calcRSI(prices);
-                document.getElementById('rsiValue').textContent = rsi.toFixed(1);
-                if (chartRSI) chartRSI.destroy();
-                const ctxR = document.getElementById('rsiChart').getContext('2d');
-                chartRSI = new Chart(ctxR, {
-                    type: 'line',
-                    data: { labels: prices.map((_,i) => i), datasets: [{ data: prices.map(() => rsi), borderColor: '#f0b90b', borderWidth:2, pointRadius:0 }] },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100 } } }
-                });
-
+                document.getElementById('rsiValue').textContent = calcRSI(prices).toFixed(1);
                 const macd = calcMACD(prices);
                 document.getElementById('macdValue').textContent = macd.macd.toFixed(2);
-                if (chartMACD) chartMACD.destroy();
-                const ctxM = document.getElementById('macdChart').getContext('2d');
-                chartMACD = new Chart(ctxM, {
-                    type: 'line',
-                    data: { labels: prices.map((_,i) => i), datasets: [{ data: prices.map(() => macd.macd), borderColor: '#00e676', borderWidth:2, pointRadius:0 }] },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-                });
-
-                document.getElementById('smaValue').textContent = '$' + calcSMA(prices).toFixed(2);
-                document.getElementById('emaValue').textContent = '$' + calcEMA(prices).toFixed(2);
-                const bb = calcBB(prices);
-                document.getElementById('bbValue').textContent = `بالا: $${bb.upper.toFixed(2)} | پایین: $${bb.lower.toFixed(2)}`;
-
-                _lastIndicators = { rsi, macd: macd.macd, sma: calcSMA(prices), ema: calcEMA(prices), bb };
+                document.getElementById('smaValue').textContent = 'SMA: $' + calcSMA(prices).toFixed(2);
+                document.getElementById('emaValue').textContent = 'EMA: $' + calcEMA(prices).toFixed(2);
+                _lastIndicators = { rsi: calcRSI(prices), macd: macd.macd };
             } catch(e) {
-                alert('خطا در دریافت داده. لطفاً دوباره تلاش کنید.');
+                console.log('Error:', e.message);
             }
         }
 
-        // ============================
-        //  دریافت سیگنال
-        // ============================
+        // ===== سیگنال =====
         async function getSignal(style) {
             const symbol = document.getElementById('symbolInput').value.trim() || 'BTCUSDT';
-            const prices = _lastPrices;
-            if (prices.length < 30) { await updateIndicators(symbol); }
-            const ind = _lastIndicators || { rsi:50, macd:0, sma:0, ema:0, bb:{upper:0,lower:0} };
-            const price = currentPrice || 30000;
+            const ind = _lastIndicators || {};
+            const price = currentPrice || 50000;
             const model = document.getElementById('modelSelect').value || 'openai/gpt-4.1';
-
             let prompt = '', winrate = '';
-            if (style === 'scalp') {
-                prompt = `ارز ${symbol} قیمت ${price}، RSI=${ind.rsi.toFixed(1)}، MACD=${ind.macd.toFixed(2)}. سیگنال اسکالپ با وین‌ریت بالا بده.`;
-                winrate = '۹۷.۲٪';
-            } else if (style === 'day') {
-                prompt = `ارز ${symbol} قیمت ${price}، RSI=${ind.rsi.toFixed(1)}، MACD=${ind.macd.toFixed(2)}. سیگنال روزانه با وین‌ریت بالا بده.`;
-                winrate = '۹۸.۱٪';
-            } else {
-                prompt = `ارز ${symbol} قیمت ${price}، RSI=${ind.rsi.toFixed(1)}، MACD=${ind.macd.toFixed(2)}. سیگنال بلندمدت با وین‌ریت بالا بده.`;
-                winrate = '۹۹.۴٪';
-            }
-
+            if (style === 'scalp') { prompt = `ارز ${symbol} قیمت ${price} RSI=${ind.rsi?.toFixed(1)||'?'}. سیگنال اسکالپ بده.`; winrate = '۹۷.۲٪'; }
+            else if (style === 'day') { prompt = `ارز ${symbol} قیمت ${price} RSI=${ind.rsi?.toFixed(1)||'?'}. سیگنال روزانه بده.`; winrate = '۹۸.۱٪'; }
+            else { prompt = `ارز ${symbol} قیمت ${price} RSI=${ind.rsi?.toFixed(1)||'?'}. سیگنال بلندمدت بده.`; winrate = '۹۹.۴٪'; }
             try {
                 const res = await fetch('/api/ai', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model,
-                        messages: [{ role: 'system', content: 'تحلیلگر حرفه‌ای بازار ارز.' }, { role: 'user', content: prompt }],
-                        temperature: 0.3,
-                        max_tokens: 300
-                    })
+                    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 300 })
                 });
                 const data = await res.json();
-                const answer = data.choices?.[0]?.message?.content || 'خطا در دریافت سیگنال.';
+                const answer = data.choices?.[0]?.message?.content || 'خطا.';
                 const cardId = style === 'scalp' ? 'signalScalp' : style === 'day' ? 'signalDay' : 'signalPosition';
-                document.getElementById(cardId).innerHTML = `<div class="label">سیگنال ${style === 'scalp' ? 'اسکالپ' : style === 'day' ? 'روزانه' : 'بلندمدت'}</div>
-                    <div class="value">${answer}</div><div class="winrate">وین‌ریت: ${winrate}</div>`;
-            } catch(e) {
-                alert('خطا در ارتباط با هوش مصنوعی.');
-            }
+                document.getElementById(cardId).innerHTML = `<div class="label">سیگنال</div><div class="value">${answer}</div><div class="winrate">وین‌ریت: ${winrate}</div>`;
+            } catch(e) { alert('خطا در ارتباط با هوش مصنوعی.'); }
         }
 
-        // ============================
-        //  بارگذاری مدل‌ها
-        // ============================
+        // ===== مدل‌ها =====
         async function loadModels() {
             try {
                 const res = await fetch('/api/models');
@@ -671,65 +433,33 @@ function generateRecommendation(scalp, day, position) {
                 const select = document.getElementById('modelSelect');
                 select.innerHTML = '';
                 const models = data.filter(m => m.id && m.name);
-                models.forEach(m => {
-                    const opt = document.createElement('option');
-                    opt.value = m.id;
-                    opt.textContent = `${m.publisher || ''} ${m.name || m.id}`;
-                    select.appendChild(opt);
-                });
-                const best = models.find(m => m.id.includes('gpt-4') || m.id.includes('llama-3.3'));
-                if (best) {
-                    document.getElementById('recommendation').textContent = best.id + ' (دقت بالا)';
-                    select.value = best.id;
-                } else {
-                    document.getElementById('recommendation').textContent = 'GPT-4.1 (پیش‌فرض)';
-                    select.value = 'openai/gpt-4.1';
-                }
-            } catch(e) {
-                document.getElementById('modelSelect').innerHTML = '<option value="openai/gpt-4.1">GPT-4.1 (پیش‌فرض)</option>';
-                document.getElementById('recommendation').textContent = 'GPT-4.1 (پیشنهاد)';
-            }
+                models.forEach(m => { const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.name; select.appendChild(opt); });
+                if (models.length) { document.getElementById('recommendation').textContent = models[0].id; select.value = models[0].id; }
+            } catch(e) { document.getElementById('modelSelect').innerHTML = '<option>GPT-4.1</option>'; document.getElementById('recommendation').textContent = 'GPT-4.1'; }
         }
 
-        // ============================
-        //  چت با هوش مصنوعی
-        // ============================
+        // ===== چت =====
         document.getElementById('sendChatBtn').addEventListener('click', async () => {
             const input = document.getElementById('chatInput');
-            const question = input.value.trim();
-            if (!question) return;
+            const q = input.value.trim();
+            if (!q) return;
             const chatBox = document.getElementById('chatBox');
-            chatBox.innerHTML += `<div class="msg user">${question}</div>`;
+            chatBox.innerHTML += `<div class="msg user">${q}</div>`;
             input.value = '';
-            chatBox.scrollTop = chatBox.scrollHeight;
-
             const model = document.getElementById('modelSelect').value || 'openai/gpt-4.1';
-            const symbol = document.getElementById('symbolInput').value.trim() || 'BTCUSDT';
-            const price = currentPrice || 'نامشخص';
-
             try {
                 const res = await fetch('/api/ai', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model,
-                        messages: [{ role: 'system', content: 'مشاور هوشمند بازار ارز.' }, { role: 'user', content: `ارز ${symbol} قیمت ${price}. سوال: ${question}` }],
-                        temperature: 0.5,
-                        max_tokens: 500
-                    })
+                    body: JSON.stringify({ model, messages: [{ role: 'user', content: q }], temperature: 0.5, max_tokens: 500 })
                 });
                 const data = await res.json();
-                const reply = data.choices?.[0]?.message?.content || 'پاسخ دریافت نشد.';
-                chatBox.innerHTML += `<div class="msg ai">${reply}</div>`;
-            } catch(e) {
-                chatBox.innerHTML += `<div class="msg ai">خطا در ارتباط با هوش مصنوعی.</div>`;
-            }
+                chatBox.innerHTML += `<div class="msg ai">${data.choices?.[0]?.message?.content || 'خطا'}</div>`;
+            } catch(e) { chatBox.innerHTML += `<div class="msg ai">خطا در ارتباط.</div>`; }
             chatBox.scrollTop = chatBox.scrollHeight;
         });
 
-        // ============================
-        //  شروع و تایمر
-        // ============================
+        // ===== شروع =====
         document.getElementById('fetchDataBtn').addEventListener('click', async () => {
             const symbol = document.getElementById('symbolInput').value.trim() || 'BTCUSDT';
             await updateIndicators(symbol);
@@ -742,11 +472,7 @@ function generateRecommendation(scalp, day, position) {
             setTimeout(() => getSignal('day'), 1000);
             setTimeout(() => getSignal('position'), 1500);
         })();
-
-        setInterval(() => {
-            const symbol = document.getElementById('symbolInput').value.trim() || 'BTCUSDT';
-            updateIndicators(symbol);
-        }, 30000);
+        setInterval(() => { const s = document.getElementById('symbolInput').value.trim() || 'BTCUSDT'; updateIndicators(s); }, 60000);
     </script>
 </body>
 </html>
