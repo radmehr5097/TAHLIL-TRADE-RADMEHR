@@ -1,40 +1,170 @@
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TAHLIL TRADE RADMEHR</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #0b0e1a;
-            color: #e0e6f0;
-            overflow-x: hidden;
-            scroll-behavior: smooth;
-        }
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #141b2b; }
-        ::-webkit-scrollbar-thumb { background: #f0b90b; border-radius: 4px; }
+// ============================================
+//  سیستم سیگنال‌دهی ترکیبی (بر اساس نمونه کانال)
+// ============================================
 
-        #stars {
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            z-index: -1;
-            background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
-            overflow: hidden;
+function generateCombinedSignal(symbol, prices, indicators) {
+    // استخراج داده‌ها
+    const price15m = prices.slice(-1)[0];
+    const price1h = prices.slice(-20); // ۲۰ کندل ۱ ساعته
+    const price4h = prices.slice(-80); // ۸۰ کندل ۴ ساعته
+    const priceDaily = prices.slice(-360); // ۳۶۰ کندل روزانه
+    
+    // محاسبه اندیکاتورها برای هر تایم‌فریم
+    const rsi15m = calcRSI(prices.slice(-14));
+    const rsi1h = calcRSI(price1h);
+    const rsiDaily = calcRSI(priceDaily);
+    
+    const macd15m = calcMACD(prices.slice(-26));
+    const macd1h = calcMACD(price1h);
+    const macdDaily = calcMACD(priceDaily);
+    
+    // سطوح حمایت و مقاومت (محاسبه با روش عرضه/تقاضا)
+    const support = Math.min(...price1h.slice(-20)) * 0.995;
+    const resistance = Math.max(...price1h.slice(-20)) * 1.005;
+    
+    // POC (نقطه کنترل حجم) - شبیه‌سازی با میانگین وزنی قیمت
+    const poc = price1h.reduce((sum, p) => sum + p, 0) / price1h.length;
+    
+    // تشخیص روند ۴ ساعت
+    const ema50_4h = calcEMA(price4h, 50);
+    const trend4h = price4h[price4h.length-1] > ema50_4h ? 'صعودی' : 'نزولی';
+    
+    // کندل فعلی ۱۵ دقیقه
+    const currentCandle = {
+        close: price15m,
+        body: price15m - prices[prices.length-2],
+        volume: Math.random() * 1000 + 500 // شبیه‌سازی (در واقعیت از API دریافت می‌شود)
+    };
+    
+    // ===== تولید سیگنال اسکالپ (سبک ۱ - مشابه نمونه شما) =====
+    const scalpSignal = generateScalpSignal({
+        price15m: currentCandle,
+        volume: currentCandle.volume,
+        avgVolume: 750,
+        rsi: rsi15m,
+        macd: macd15m,
+        support: support,
+        resistance: resistance,
+        poc: poc,
+        fourHourTrend: trend4h
+    });
+    
+    // ===== تولید سیگنال روزانه (سبک ۲) =====
+    const daySignal = generateDaySignal({
+        price1h: { close: price1h[price1h.length-1], low: Math.min(...price1h.slice(-5)) },
+        price4h: { close: price4h[price4h.length-1], low: Math.min(...price4h.slice(-5)), high: Math.max(...price4h.slice(-5)) },
+        rsi1h: rsi1h,
+        macd1h: macd1h,
+        ema20: calcEMA(price1h, 20),
+        ema50: calcEMA(price1h, 50),
+        superTrend: calcSuperTrend(price1h),
+        fibLevels: calcFibonacci(price1h)
+    });
+    
+    // ===== تولید سیگنال پوزیشن (سبک ۳) =====
+    const positionSignal = generatePositionSignal({
+        priceDaily: { close: priceDaily[priceDaily.length-1] },
+        priceWeekly: { close: priceDaily.filter((_, i) => i % 7 === 0) },
+        rsiWeekly: calcRSI(priceDaily.filter((_, i) => i % 7 === 0)),
+        macdWeekly: calcMACD(priceDaily.filter((_, i) => i % 7 === 0)),
+        ichimoku: calcIchimoku(priceDaily),
+        bb: calcBB(priceDaily),
+        volume: { current: 1000, avg: 800 }
+    });
+    
+    // ===== ترکیب نهایی =====
+    const finalSignal = {
+        timestamp: new Date().toLocaleString('fa-IR'),
+        symbol: symbol,
+        currentPrice: price15m,
+        scalp: scalpSignal,
+        day: daySignal,
+        position: positionSignal,
+        summary: {
+            bestAction: determineBestAction(scalpSignal, daySignal, positionSignal),
+            riskLevel: calculateOverallRisk(scalpSignal, daySignal, positionSignal),
+            confidence: calculateOverallConfidence(scalpSignal, daySignal, positionSignal),
+            recommendation: generateRecommendation(scalpSignal, daySignal, positionSignal)
         }
-        .star {
-            position: absolute;
-            border-radius: 50%;
-            background: white;
-            animation: twinkle var(--duration) infinite alternate;
-        }
-        @keyframes twinkle {
-            0% { opacity: 0.2; transform: scale(0.8); }
+    };
+    
+    return finalSignal;
+}
+
+// ===== توابع کمکی =====
+function determineBestAction(scalp, day, position) {
+    const actions = [];
+    if (scalp.type === 'BUY' || scalp.type === 'SELL') actions.push(scalp.type);
+    if (day.type === 'BUY' || day.type === 'SELL') actions.push(day.type);
+    if (position.type === 'BUY (LONG-TERM)' || position.type === 'SELL (LONG-TERM)') actions.push(position.type);
+    
+    if (actions.length === 0) return 'WAIT (صبر کنید)';
+    
+    // اگر حداقل ۲ تایم‌فریم هم‌جهت بودند، سیگنال قوی است
+    const buyCount = actions.filter(a => a.includes('BUY')).length;
+    const sellCount = actions.filter(a => a.includes('SELL')).length;
+    
+    if (buyCount >= 2) return 'BUY (خرید قوی)';
+    if (sellCount >= 2) return 'SELL (فروش قوی)';
+    if (buyCount === 1 && sellCount === 0) return 'BUY (خرید ضعیف)';
+    if (sellCount === 1 && buyCount === 0) return 'SELL (فروش ضعیف)';
+    
+    return 'WAIT (تضاد سیگنال‌ها)';
+}
+
+function calculateOverallRisk(scalp, day, position) {
+    let riskScore = 0;
+    if (scalp.type === 'WAIT') riskScore += 20;
+    if (day.type === 'NEUTRAL') riskScore += 20;
+    if (position.type === 'HOLD') riskScore += 20;
+    if (scalp.type === 'BUY' || scalp.type === 'SELL') riskScore += 10;
+    if (day.type === 'BUY' || day.type === 'SELL') riskScore += 10;
+    if (position.type === 'BUY (LONG-TERM)' || position.type === 'SELL (LONG-TERM)') riskScore += 5;
+    
+    if (riskScore >= 60) return 'پایین';
+    if (riskScore >= 40) return 'متوسط';
+    return 'بالا';
+}
+
+function calculateOverallConfidence(scalp, day, position) {
+    let confidenceScore = 0;
+    if (scalp.type === 'BUY' || scalp.type === 'SELL') confidenceScore += 30;
+    if (day.type === 'BUY' || day.type === 'SELL') confidenceScore += 30;
+    if (position.type === 'BUY (LONG-TERM)' || position.type === 'SELL (LONG-TERM)') confidenceScore += 40;
+    if (scalp.type === 'WAIT' && scalp.condition.includes('شرط')) confidenceScore += 10;
+    if (day.confidence === 'بالا') confidenceScore += 10;
+    if (position.confidence === 'بالا') confidenceScore += 10;
+    
+    if (confidenceScore >= 70) return 'بالا (۹۰٪)';
+    if (confidenceScore >= 50) return 'متوسط (۷۰٪)';
+    return 'پایین (۵۰٪)';
+}
+
+function generateRecommendation(scalp, day, position) {
+    let rec = '';
+    
+    if (scalp.type === 'WAIT' && scalp.condition.includes('ناحیه عرضه')) {
+        rec += '⚠️ اسکالپ: ' + scalp.condition + '. ';
+    } else if (scalp.type === 'BUY' || scalp.type === 'SELL') {
+        rec += `✅ اسکالپ: ${scalp.type} در ${scalp.entry} - SL: ${scalp.sl} - اهداف: ${scalp.targets.join(', ')}. `;
+    }
+    
+    if (day.type === 'BUY' || day.type === 'SELL') {
+        rec += `📊 روزانه: ${day.type} در ${day.entry} - SL: ${day.sl} - اهداف: ${day.targets.join(', ')}. `;
+    }
+    
+    if (position.type === 'BUY (LONG-TERM)' || position.type === 'SELL (LONG-TERM)') {
+        rec += `🏛️ پوزیشن: ${position.type} در ${position.entry} - افق زمانی: ${position.timeHorizon}. `;
+    }
+    
+    if (!rec) {
+        rec = '🧘 هیچ سیگنال معاملاتی فعالی وجود ندارد. به‌ترین کار «تماشا و صبر کردن» است.';
+    }
+    
+    rec += `\n📱 جهت پشتیبانی و مشاوره تخصصی با تلفن 09138665345 تماس حاصل فرمایید.`;
+    
+    return rec;
+}            0% { opacity: 0.2; transform: scale(0.8); }
             100% { opacity: 1; transform: scale(1.2); }
         }
 
